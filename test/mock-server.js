@@ -7,6 +7,10 @@
 // unpaid-key (an organization without a subscription), anything else invalid.
 // Hosts: anything with "malware" in it scores 500 and is listed; anything
 // with "dead" in it does not resolve; everything else scores 8,200.
+//
+// `org` holds what the organization set on its CI/CD page: the threshold, the
+// reuse window, and "owner/repo host" entries switched off. Like the real
+// server, the mock ignores any minScore / maxAge in the body.
 
 import { createServer } from "node:http";
 import { randomUUID } from "node:crypto";
@@ -15,6 +19,7 @@ export async function startMockServer({ rateLimitFirstCheck = false, busyFirstCh
   const calls = [];
   const received = []; // every request body
   const recent = new Map(); // host → the last fresh result
+  const org = { minScore: 3000, maxAge: 86400, disabled: new Set() };
   let rateLimited = !rateLimitFirstCheck;
   let busy = !busyFirstCheck;
 
@@ -59,8 +64,10 @@ export async function startMockServer({ rateLimitFirstCheck = false, busyFirstCh
     received.push(body);
     const target = new URL(body.url);
     const host = target.hostname;
-    const minScore = body.minScore ?? 3000;
-    const maxAge = body.maxAge ?? 86400;
+    const { minScore, maxAge } = org;
+    if (org.disabled.has(`${body.ci?.repository} ${host}`)) {
+      return send(res, 200, { host, url: body.url, verdict: "skipped", score: null, risk: null, minScore, threats: [], scanId: null, reportUrl: null, scannedAt: null, reused: false });
+    }
 
     if (host.includes("dead")) {
       return send(res, 422, { error: `Hostname does not resolve: ${host}`, code: "unreachable", host });
@@ -92,6 +99,7 @@ export async function startMockServer({ rateLimitFirstCheck = false, busyFirstCh
     calls,
     received,
     recent,
+    org,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

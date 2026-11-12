@@ -2,7 +2,9 @@
 # the JSON report as an artifact.
 #
 # Add one of your organization's API keys as a repository secret named
-# LINKTHREATSCAN_API_KEY (Settings → Secrets and variables → Actions).
+# LINKTHREATSCAN_API_KEY (Settings → Secrets and variables → Actions). The
+# threshold, the reuse window and the hosts to skip are set on your
+# organization's CI/CD page at linkthreatscan.com.
 
 name: Link check
 
@@ -33,8 +35,6 @@ jobs:
           exclude-hosts: |
             github.com
             npmjs.com
-          min-score: 3000
-          max-age: 24h
 
       - name: Keep the report
         if: always() && steps.links.outputs.report != ''

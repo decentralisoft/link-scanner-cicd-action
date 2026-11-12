@@ -9,17 +9,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { detectCiContext } from "./ci.js";
 import { createClient, DEFAULT_API_URL } from "./client.js";
-import {
-  bySeverity,
-  checkHosts,
-  DEFAULT_MAX_AGE_SECONDS,
-  DEFAULT_MIN_SCORE,
-  parseDuration,
-  parseMinScore,
-  Status,
-  summarize,
-  where,
-} from "./check.js";
+import { bySeverity, checkHosts, Status, summarize, thresholdOf, where } from "./check.js";
 import { buildReport, findLinks } from "./find.js";
 
 const input = (name, fallback = "") => {
@@ -70,19 +60,24 @@ const cell = (s) => String(s).replace(/\|/g, "\\|").replace(/\n/g, " ");
 const fmt = (n) => (typeof n === "number" ? n.toLocaleString("en-US") : "—");
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-function detail(r, minScore) {
+/** Inputs the organization's CI/CD page replaced. */
+const MOVED_INPUTS = ["min-score", "max-age"];
+
+function detail(r) {
   switch (r.status) {
     case Status.MALICIOUS:
-      return `scored ${fmt(r.score)}/10,000, below ${fmt(minScore)}` + (r.threats.length ? `; listed by ${r.threats.join(", ")}` : "");
+      return `scored ${fmt(r.score)}/10,000, below ${fmt(r.minScore)}` + (r.threats.length ? `; listed by ${r.threats.join(", ")}` : "");
     case Status.CLEAN:
       return r.reused ? "recent result reused" : "";
+    case Status.SKIPPED:
+      return "switched off for this repository on linkthreatscan.com";
     default:
       return r.error || "";
   }
 }
 
 function summaryMarkdown(summary, results, minScore) {
-  const icon = { CLEAN: "✅", MALICIOUS: "🛑", ERROR: "⚠️", UNREACHABLE: "➖" };
+  const icon = { CLEAN: "✅", MALICIOUS: "🛑", ERROR: "⚠️", UNREACHABLE: "➖", SKIPPED: "⏭️" };
   const headline =
     summary.result === "malicious"
       ? `🛑 **${plural(summary.malicious, "malicious host")} linked from this repository.**`
@@ -94,7 +89,7 @@ function summaryMarkdown(summary, results, minScore) {
     const found = r.occurrences.slice(0, 3).map((o) => `\`${cell(where(o))}\``);
     if (r.occurrences.length > 3) found.push(`+${r.occurrences.length - 3} more`);
     const report = r.reportUrl ? `[report](${r.reportUrl})` : "";
-    return `| ${icon[r.status]} ${r.status} | \`${cell(r.host)}\` | ${fmt(r.score)} | ${found.join(", ")} | ${cell(detail(r, minScore))} | ${report} |`;
+    return `| ${icon[r.status]} ${r.status} | \`${cell(r.host)}\` | ${fmt(r.score)} | ${found.join(", ")} | ${cell(detail(r))} | ${report} |`;
   });
   return [
     "### LinkThreatScan link check",
@@ -102,7 +97,8 @@ function summaryMarkdown(summary, results, minScore) {
     headline,
     "",
     `${plural(summary.links, "link")} to ${plural(summary.hosts, "host")} · ${summary.clean} clean · ${summary.malicious} malicious · ` +
-      `${summary.unreachable} unreachable · ${summary.errors} failed · ${summary.reused} reused from the last checks`,
+      `${summary.unreachable} unreachable · ${summary.errors} failed · ${summary.reused} reused from the last checks` +
+      (summary.skipped ? ` · ${summary.skipped} switched off` : ""),
     "",
     "| Result | Host | Score | Found in | Detail | |",
     "|---|---|---|---|---|---|",
@@ -126,8 +122,15 @@ export async function run() {
   if (!["error", "warn", "ignore"].includes(ifNoLinks)) {
     throw new Error("Input 'if-no-links-found' must be error, warn or ignore.");
   }
-  const minScore = parseMinScore(input("min-score", String(DEFAULT_MIN_SCORE)), "Input 'min-score'");
-  const maxAge = parseDuration(input("max-age", String(DEFAULT_MAX_AGE_SECONDS)), "Input 'max-age'");
+  for (const name of MOVED_INPUTS) {
+    if (input(name)) {
+      command(
+        "warning",
+        { title: "Input ignored" },
+        `'${name}' is no longer read: the threshold and how long a result is reused are set on your organization's CI/CD page at linkthreatscan.com. Remove it from the workflow.`,
+      );
+    }
+  }
   const failOnMalicious = bool("fail-on-malicious", true);
   const failOnUnreachable = bool("fail-on-unreachable", false);
   const failOnError = bool("fail-on-error", true);
@@ -145,7 +148,7 @@ export async function run() {
   if (groups.length === 0) {
     const message = `No links to check in ${plural(filesRead, "file")}.`;
     await setOutput("result", "none");
-    await setCounts({ links: 0, hosts: 0, malicious: 0, unreachable: 0, errors: 0 });
+    await setCounts({ links: 0, hosts: 0, malicious: 0, unreachable: 0, errors: 0, skipped: 0 });
     if (ifNoLinks === "error") throw new Error(message);
     if (ifNoLinks === "warn") command("warning", {}, message);
     else console.log(message);
@@ -164,13 +167,11 @@ export async function run() {
   const results = await checkHosts(client, groups, {
     concurrency,
     ci,
-    maxAge,
-    minScore,
     private: isPrivate,
     batchId: randomUUID(),
     onResult: (r) => {
       if (r.status === Status.MALICIOUS) {
-        const message = `${r.host} ${detail(r, minScore)}.${r.reportUrl ? ` Report: ${r.reportUrl}` : ""}`;
+        const message = `${r.host} ${detail(r)}.${r.reportUrl ? ` Report: ${r.reportUrl}` : ""}`;
         for (const o of r.occurrences.slice(0, ANNOTATIONS_PER_HOST)) {
           const file = o.line ? o.file : undefined;
           command("error", { file, line: o.line, col: o.column, title: "Malicious link" }, `${o.url} — ${message}`);
@@ -184,15 +185,18 @@ export async function run() {
         command(failOnUnreachable ? "error" : "warning", props, `${o.url} — ${r.error}`);
       } else if (r.status === Status.ERROR) {
         command(failOnError ? "error" : "warning", { title: "Check failed" }, `${r.host}: ${r.error}`);
+      } else if (r.status === Status.SKIPPED) {
+        console.log(`  skipped  ${r.host.padEnd(40)} switched off on linkthreatscan.com`);
       } else {
         console.log(`  clean  ${r.host.padEnd(40)} ${fmt(r.score).padStart(6)}${r.reused ? "  (reused)" : ""}`);
       }
     },
   });
   const summary = summarize(results);
+  const minScore = thresholdOf(results);
 
   const reportPath = join(process.env.RUNNER_TEMP || cwd, `linkthreatscan-report-${Date.now()}.json`);
-  const report = buildReport({ apiUrl: client.apiUrl, ci, minScore, maxAge, summary, results });
+  const report = buildReport({ apiUrl: client.apiUrl, ci, minScore, summary, results });
   await writeFile(reportPath, JSON.stringify(report, null, 2) + "\n");
   await setOutput("result", summary.result);
   await setCounts({
@@ -201,6 +205,7 @@ export async function run() {
     malicious: summary.malicious,
     unreachable: summary.unreachable,
     errors: summary.errors,
+    skipped: summary.skipped,
   });
   await setOutput("report", reportPath);
   if (process.env.GITHUB_STEP_SUMMARY) {
@@ -209,7 +214,7 @@ export async function run() {
 
   console.log(
     `\n${plural(summary.hosts, "host")}: ${summary.clean} clean, ${summary.malicious} malicious, ` +
-      `${summary.unreachable} unreachable, ${summary.errors} failed (${summary.reused} reused).`,
+      `${summary.unreachable} unreachable, ${summary.errors} failed, ${summary.skipped} skipped (${summary.reused} reused).`,
   );
   if (summary.malicious && failOnMalicious) {
     command("error", {}, `${plural(summary.malicious, "malicious host")} linked from this repository.`);

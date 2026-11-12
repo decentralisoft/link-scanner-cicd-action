@@ -44,10 +44,11 @@ test("scan exits 0 for clean links and 1 for a malicious one", async () => {
 
 test("check takes URLs, and --json / --report write the report", async () => {
   const report = join(dir, "out.json");
-  const r = await cli(["check", "https://malware-two.com/a?b=c", "--json", "--report", report, "--max-age", "0"]);
+  const r = await cli(["check", "https://malware-two.com/a?b=c", "--json", "--report", report]);
   assert.equal(r.code, 1);
   const printed = JSON.parse(r.stdout);
   assert.equal(printed.summary.malicious, 1);
+  assert.equal(printed.minScore, 3000, "the organization's threshold, as the server applied it");
   assert.equal(printed.results[0].links[0].url, "https://malware-two.com/a?b=c");
   assert.deepEqual(JSON.parse(await readFile(report, "utf8")).summary, printed.summary);
 });
@@ -55,7 +56,6 @@ test("check takes URLs, and --json / --report write the report", async () => {
 test("usage errors and API refusals exit 2", async () => {
   assert.equal((await cli(["frobnicate"])).code, 2);
   assert.equal((await cli(["check"])).code, 2);
-  assert.equal((await cli(["scan", "--min-score", "-1"])).code, 2);
   assert.equal((await cli(["scan", "--private", "--public"])).code, 2);
   const personal = await cli(["scan"], { LINKTHREATSCAN_API_KEY: "personal-key" });
   assert.equal(personal.code, 2);
@@ -64,6 +64,15 @@ test("usage errors and API refusals exit 2", async () => {
   assert.match(unpaid.stdout, /requires an active subscription/);
   const missing = await cli(["scan"], { LINKTHREATSCAN_API_KEY: "" });
   assert.match(missing.stderr, /No API key/);
+});
+
+test("--min-score and --max-age are ignored with a warning; the organization's settings apply", async () => {
+  const from = server.received.length;
+  const r = await cli(["scan", "README.md", "--min-score", "9000", "--max-age", "0"]);
+  assert.equal(r.code, 0, "8,200 passes the organization's 3,000");
+  assert.match(r.stderr, /--min-score is ignored/);
+  assert.match(r.stderr, /--max-age is ignored/);
+  assert.ok(server.received.slice(from).every((b) => !("minScore" in b) && !("maxAge" in b)));
 });
 
 test("--private and --public are passed through, absent means the organization's default", async () => {

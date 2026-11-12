@@ -8,17 +8,7 @@ import { randomUUID } from "node:crypto";
 import { parseArgs } from "node:util";
 import { detectCiContext } from "./ci.js";
 import { createClient, DEFAULT_API_URL } from "./client.js";
-import {
-  bySeverity,
-  checkHosts,
-  DEFAULT_MAX_AGE_SECONDS,
-  DEFAULT_MIN_SCORE,
-  parseDuration,
-  parseMinScore,
-  Status,
-  summarize,
-  where,
-} from "./check.js";
+import { bySeverity, checkHosts, Status, summarize, thresholdOf, where } from "./check.js";
 import { buildReport, findLinks } from "./find.js";
 import { VERSION } from "./version.js";
 
@@ -33,8 +23,6 @@ Usage:
 Options:
   --url <url>              Also check this URL (repeatable)
   --exclude-host <host>    Skip a host and its subdomains, or a glob like *.corp.example (repeatable)
-  --min-score <n>          A host scoring below this is malicious (0–10000, default ${DEFAULT_MIN_SCORE})
-  --max-age <duration>     Reuse your organization's CI result for a host if newer (default 24h; 0 = always scan)
   --max-hosts <n>          Refuse to start above this many hosts (default 500)
   --private / --public     Whether new scans' reports are private (default: the organization's setting)
   --json                   Print the JSON report instead of text
@@ -51,13 +39,17 @@ Options:
 Globs: *, **, ?, [abc], {a,b}; prefix with ! to exclude, e.g. 'docs/**' '!docs/archive/**'.
 .git and node_modules are never read; lockfiles and source maps are skipped.
 Only each host's origin (https://host/) is sent to the API, never a path or query.
-Requires an organization's API key on a subscribed organization.
+Requires an organization's API key on a subscribed organization. The threshold,
+how long a result is reused and the hosts to skip are set on the organization's
+CI/CD page at linkthreatscan.com.
 On GitHub Actions and GitLab CI, checks carry the repository, commit and run.
 Exit codes: 0 clean, 1 malicious link found, 2 error.`;
 
 const OPTIONS = {
   url: { type: "string", multiple: true },
   "exclude-host": { type: "string", multiple: true },
+  // No longer read (the organization's CI/CD page sets both); accepted so an
+  // old script gets a warning instead of a usage error.
   "min-score": { type: "string" },
   "max-age": { type: "string" },
   "max-hosts": { type: "string" },
@@ -100,6 +92,8 @@ function formatLine(r) {
       );
     case Status.UNREACHABLE:
       return `  unreachable  ${r.host}  ${r.error}  ${at}`.trimEnd();
+    case Status.SKIPPED:
+      return `  skipped      ${r.host}  switched off on linkthreatscan.com`;
     default:
       return `! error        ${r.host}  ${r.error || ""}`.trimEnd();
   }
@@ -143,8 +137,11 @@ export async function main(argv, io = {}) {
     if (command === "check" && rest.length === 0) throw new UsageError("Usage: linkthreatscan check <url>...");
     if (opts.private && opts.public) throw new UsageError("Pass --private or --public, not both.");
 
-    const minScore = parseMinScore(opts["min-score"] ?? DEFAULT_MIN_SCORE, "--min-score");
-    const maxAge = parseDuration(opts["max-age"] ?? DEFAULT_MAX_AGE_SECONDS, "--max-age");
+    for (const name of ["min-score", "max-age"]) {
+      if (opts[name] !== undefined) {
+        warn(`linkthreatscan: --${name} is ignored — the threshold and reuse window are set on your organization's CI/CD page at linkthreatscan.com.`);
+      }
+    }
     const maxHosts = positiveInt(opts["max-hosts"], "max-hosts", 500);
     const concurrency = positiveInt(opts.concurrency, "concurrency", 4);
     const timeoutMs = positiveInt(opts.timeout, "timeout", 300) * 1000;
@@ -184,14 +181,12 @@ export async function main(argv, io = {}) {
     const results = await checkHosts(client, groups, {
       concurrency,
       ci,
-      maxAge,
-      minScore,
       private: isPrivate,
       batchId: randomUUID(),
       onResult: opts.json ? undefined : (r) => print(formatLine(r)),
     });
     const summary = summarize(results);
-    const report = buildReport({ apiUrl: client.apiUrl, ci, minScore, maxAge, summary, results: [...results].sort(bySeverity) });
+    const report = buildReport({ apiUrl: client.apiUrl, ci, minScore: thresholdOf(results), summary, results: [...results].sort(bySeverity) });
 
     if (opts.report) await writeFile(opts.report, JSON.stringify(report, null, 2) + "\n");
     if (opts.json) {
@@ -203,6 +198,7 @@ export async function main(argv, io = {}) {
           `${summary.clean} clean, ${summary.malicious} malicious` +
           (summary.unreachable ? `, ${summary.unreachable} unreachable` : "") +
           (summary.errors ? `, ${summary.errors} failed` : "") +
+          (summary.skipped ? `, ${summary.skipped} skipped` : "") +
           (summary.reused ? ` (${summary.reused} reused)` : ""),
       );
     }

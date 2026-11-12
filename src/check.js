@@ -1,6 +1,10 @@
 // Check every host a repository links to, a few at a time, and add up the
 // verdicts. One host is one call: the server reuses the organization's recent
 // CI result for it when there is one, and runs a full scan otherwise.
+//
+// The threshold, the reuse window and the hosts to skip are the
+// organization's, set on its CI/CD page at linkthreatscan.com: the server
+// judges each host and says so in `verdict`.
 
 import { ApiError } from "./client.js";
 
@@ -13,8 +17,12 @@ export const Status = Object.freeze({
   UNREACHABLE: "UNREACHABLE",
   /** The check itself failed: the API refused it or could not be reached. */
   ERROR: "ERROR",
+  /** Switched off for this repository on linkthreatscan.com: not scanned. */
+  SKIPPED: "SKIPPED",
 });
 
+// The three below are kept for library users. The Action and the CLI no
+// longer read a threshold or a reuse window: the organization sets both.
 export const DEFAULT_MIN_SCORE = 3000;
 /** Reuse a CI result for the same host from the last 24 hours. */
 export const DEFAULT_MAX_AGE_SECONDS = 24 * 3600;
@@ -54,23 +62,22 @@ function isFatal(err) {
  * Check one host. Never throws: every outcome is a result object.
  * @param {{ host: string, url: string, occurrences: object[] }} group
  */
-export async function checkHost(client, group, { ci, maxAge, minScore, private: isPrivate, batchId } = {}) {
+export async function checkHost(client, group, { ci, private: isPrivate, batchId } = {}) {
   const result = { host: group.host, url: group.url, status: Status.ERROR, occurrences: group.occurrences };
   try {
     const v = await client.checkLink({
       url: group.url,
       ci,
-      maxAge,
-      minScore,
       private: isPrivate,
       batchId,
       links: group.occurrences.length,
     });
-    const failed = v.verdict ? v.verdict === "failed" : Number(v.score) < (minScore ?? DEFAULT_MIN_SCORE);
+    const status = v.verdict === "skipped" ? Status.SKIPPED : v.verdict === "failed" ? Status.MALICIOUS : Status.CLEAN;
     return {
       ...result,
-      status: failed ? Status.MALICIOUS : Status.CLEAN,
-      score: v.score,
+      status,
+      minScore: typeof v.minScore === "number" ? v.minScore : null,
+      score: v.score ?? null,
       risk: v.risk ?? null,
       threats: v.threats ?? [],
       scanId: v.scanId ?? null,
@@ -124,6 +131,7 @@ export function summarize(results) {
     malicious: count(Status.MALICIOUS),
     unreachable: count(Status.UNREACHABLE),
     errors: count(Status.ERROR),
+    skipped: count(Status.SKIPPED),
     reused: results.filter((r) => r.reused).length,
   };
   summary.result = summary.malicious ? "malicious" : summary.errors ? "error" : "clean";
@@ -132,8 +140,13 @@ export function summarize(results) {
 
 /** Most serious first, then by host. */
 export function bySeverity(a, b) {
-  const order = { MALICIOUS: 0, ERROR: 1, UNREACHABLE: 2, CLEAN: 3 };
+  const order = { MALICIOUS: 0, ERROR: 1, UNREACHABLE: 2, CLEAN: 3, SKIPPED: 4 };
   return order[a.status] - order[b.status] || a.host.localeCompare(b.host);
+}
+
+/** The organization's threshold, as the server reported it; null before any verdict. */
+export function thresholdOf(results) {
+  return results.find((r) => typeof r.minScore === "number")?.minScore ?? null;
 }
 
 /** "README.md:14" */

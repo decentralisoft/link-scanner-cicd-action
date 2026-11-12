@@ -126,18 +126,14 @@ export function createClient({
      * @param {object} req
      * @param {string} req.url
      * @param {object|null} [req.ci]     the pipeline context (ci.js)
-     * @param {number} [req.maxAge]      seconds: reuse the organization's CI result for this host if newer
-     * @param {number} [req.minScore]    a score below this fails (0–10000)
      * @param {boolean} [req.private]    whether a fresh scan's report is private; default: the organization's
      * @param {string} [req.batchId]     groups one run's checks on the CI/CD page
      * @param {number} [req.links]       how many links point at the host (shown on the CI/CD page)
      */
-    checkLink: ({ url, ci, maxAge, minScore, private: isPrivate, batchId, links }) =>
+    checkLink: ({ url, ci, private: isPrivate, batchId, links }) =>
       call("POST", "/api/v1/ci/check", {
         url,
         ...(ci ? { ci } : {}),
-        ...(maxAge !== undefined ? { maxAge } : {}),
-        ...(minScore !== undefined ? { minScore } : {}),
         ...(isPrivate !== undefined ? { private: isPrivate } : {}),
         ...(batchId ? { batchId } : {}),
         ...(links ? { links } : {}),

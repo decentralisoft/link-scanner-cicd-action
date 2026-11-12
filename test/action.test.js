@@ -81,14 +81,13 @@ test("a malicious link fails the step, is annotated at its line and fills the su
 
 test("only each host's origin is sent, with the run's context, and one batch id per run", async () => {
   const from = server.received.length;
-  await runAction({ "api-key": "org-key", "max-age": "0" }, GITHUB_RUN);
+  await runAction({ "api-key": "org-key" }, GITHUB_RUN);
   const sent = server.received.slice(from);
   assert.deepEqual(sent.map((b) => b.url).sort(), ["http://malware-host.com/", "https://dead-mirror.net/", "https://good.dev/"]);
   assert.ok(!JSON.stringify(sent).includes("s3cret"), "no path or query ever leaves the runner");
   assert.equal(new Set(sent.map((b) => b.batchId)).size, 1);
   assert.equal(sent[0].ci.runUrl, "https://github.com/acme/app/actions/runs/42");
-  assert.equal(sent[0].maxAge, 0);
-  assert.equal(sent[0].minScore, 3000);
+  assert.ok(sent.every((b) => !("minScore" in b) && !("maxAge" in b)), "the organization sets the threshold, not the pipeline");
   assert.equal(sent.find((b) => b.url === "https://good.dev/").links, 1);
 });
 
@@ -105,8 +104,16 @@ test("clean links pass; the threshold and failure switches are honoured", async 
   assert.equal(clean.outputs.result, "clean");
   assert.match(clean.summary, /All 1 linked host scored 3,000 or more/);
 
-  const strict = await runAction({ "api-key": "org-key", files: "README.md", "min-score": "9000" });
-  assert.equal(strict.code, 1, "8,200 is below 9,000");
+  server.org.minScore = 9000;
+  try {
+    const strict = await runAction({ "api-key": "org-key", files: "README.md" });
+    assert.equal(strict.code, 1, "8,200 is below the organization's 9,000");
+    assert.match(strict.stdout, /good\.dev scored 8,200\/10,000, below 9,000/);
+    const report = JSON.parse(await readFile(strict.outputs.report, "utf8"));
+    assert.equal(report.minScore, 9000);
+  } finally {
+    server.org.minScore = 3000;
+  }
 
   const report = await runAction({ "api-key": "org-key", files: "docs/install.md", "fail-on-malicious": "false" });
   assert.equal(report.code, 0);
@@ -148,9 +155,35 @@ test("a personal key is told CI/CD is for organizations, and the run stops at th
   assert.match(r.stdout, /Not checked/);
 });
 
+test("a host switched off for the repository on linkthreatscan.com is skipped, not failed", async () => {
+  server.org.disabled.add("acme/app malware-host.com");
+  try {
+    const r = await runAction({ "api-key": "org-key", files: "docs/install.md" }, GITHUB_RUN);
+    assert.equal(r.code, 0, r.stdout);
+    assert.equal(r.outputs.result, "clean");
+    assert.equal(r.outputs.skipped, "1");
+    assert.equal(r.outputs.malicious, "0");
+    assert.match(r.stdout, /skipped {2}malware-host\.com/);
+    assert.match(r.summary, /\| ⏭️ SKIPPED \| `malware-host\.com` \|/);
+    assert.match(r.summary, /1 switched off/);
+    // Another repository still checks it.
+    const other = await runAction({ "api-key": "org-key", files: "docs/install.md" }, { ...GITHUB_RUN, GITHUB_REPOSITORY: "acme/other" });
+    assert.equal(other.code, 1);
+  } finally {
+    server.org.disabled.clear();
+  }
+});
+
+test("min-score and max-age in a workflow are ignored, with a warning", async () => {
+  const from = server.received.length;
+  const r = await runAction({ "api-key": "org-key", files: "README.md", "min-score": "9000", "max-age": "0" });
+  assert.equal(r.code, 0, "judged on the organization's 3,000, not 9,000");
+  assert.match(r.stdout, /::warning title=Input ignored::'min-score' is no longer read/);
+  assert.match(r.stdout, /::warning title=Input ignored::'max-age' is no longer read/);
+  assert.ok(server.received.slice(from).every((b) => !("minScore" in b) && !("maxAge" in b)));
+});
+
 test("bad inputs and a missing key fail with a clear message", async () => {
   assert.match((await runAction({ files: "README.md" })).stdout, /::error::No API key/);
-  assert.match((await runAction({ "api-key": "org-key", "min-score": "12000" })).stdout, /min-score' must be a whole number from 0 to 10000/);
-  assert.match((await runAction({ "api-key": "org-key", "max-age": "forever" })).stdout, /max-age' must be a duration/);
-  assert.match((await runAction({ "api-key": "org-key", "max-age": "31d" })).stdout, /at most 30 days/);
+  assert.match((await runAction({ "api-key": "org-key", concurrency: "0" })).stdout, /concurrency' must be a positive whole number/);
 });

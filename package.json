@@ -1,6 +1,6 @@
 {
   "name": "linkthreatscan",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Find malicious links in your code with LinkThreatScan — from your terminal or CI.",
   "license": "MIT",
   "type": "module",

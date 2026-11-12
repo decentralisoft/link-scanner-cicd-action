@@ -1,5 +1,5 @@
 name: LinkThreatScan Link Check
-description: Find malicious links in your repository — every linked host scored by LinkThreatScan, the build failed below your threshold. For organizations.
+description: Find malicious links in your repository — every linked host scored by LinkThreatScan, the build failed below the threshold your organization sets on linkthreatscan.com.
 author: LinkThreatScan
 branding:
   icon: link
@@ -21,12 +21,6 @@ inputs:
   exclude-hosts:
     description: Hosts to skip, one per line or comma-separated. "example.org" also skips its subdomains; "*.cdn.example.org" is a glob.
     default: ""
-  min-score:
-    description: A host scoring below this (0–10000) is malicious. Hosts on a threat list score 1000 at most.
-    default: "3000"
-  max-age:
-    description: Reuse your organization's CI result for a host when it is newer than this (e.g. 24h, 7d, 3600). Reused results cost no scan. 0 always scans.
-    default: "24h"
   fail-on-malicious:
     description: Fail the step when a malicious link is found.
     default: "true"
@@ -68,6 +62,8 @@ outputs:
     description: Number of hosts that could not be scanned.
   errors:
     description: Number of hosts that could not be checked.
+  skipped:
+    description: Number of hosts switched off for this repository on linkthreatscan.com (not scanned).
   report:
     description: Path to the JSON report (every host's verdict, score, report link, and every file and line linking to it).
 

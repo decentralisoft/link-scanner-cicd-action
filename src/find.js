@@ -27,13 +27,13 @@ export async function findLinks({ patterns, urls = [], excludeHosts = [], cwd })
 }
 
 /** The JSON report both the Action and the CLI write. */
-export function buildReport({ apiUrl, ci, minScore, maxAge, summary, results }) {
+export function buildReport({ apiUrl, ci, minScore, summary, results }) {
   return {
     version: 1,
     apiUrl,
     ...(ci ? { ci } : {}),
-    minScore,
-    maxAge,
+    // The organization's threshold, as the server applied it.
+    minScore: minScore ?? null,
     summary,
     results: results.map(({ occurrences, ...r }) => ({ ...r, links: occurrences })),
   };

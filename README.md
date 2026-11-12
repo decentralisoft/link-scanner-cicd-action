@@ -3,16 +3,22 @@
 Fail a build when your repository links to a malicious site. Every link in
 your code, docs and config is found, grouped by host, and scored by
 [LinkThreatScan](https://linkthreatscan.com). A host scoring below your
-threshold fails the step, with an annotation on each line that links to it.
+organization's threshold fails the step, with an annotation on each line that
+links to it.
 
 - **For organizations.** It takes an organization's API key, on a subscribed
   organization. Personal keys are refused (`403 organization_required`).
 - **Only origins leave the runner.** Each host is checked once, as
   `https://host/`. Paths and query strings, which can carry tokens, are never
   sent.
-- **Cheap on re-runs.** If your organization checked a host in the last 24
-  hours, that result is reused and costs no scan. Every other host is one
-  full scan on your organization's daily volume.
+- **Configured on linkthreatscan.com, not in the workflow.** Your
+  organization's **CI/CD** page sets the minimum score (3,000 to start) and
+  how long a result is reused (24 hours to start), and lists the hosts of each
+  repository's latest run so you can switch any of them off — later runs skip
+  it.
+- **Cheap on re-runs.** A host your organization checked within the reuse
+  window is answered from that result and costs no scan. Every other host is
+  one full scan on your organization's daily volume.
 - **No dependencies.** Node 20+ only.
 
 Every run shows on your organization's **CI/CD** page on
@@ -50,8 +56,6 @@ jobs:
 | `files` | `.` | Paths, directories or globs to read, one per line. `!` excludes. |
 | `urls` | — | More URLs to check, one per line. |
 | `exclude-hosts` | — | Hosts to skip, one per line or comma-separated. `example.org` also skips its subdomains. `*.cdn.example.org` is a glob. |
-| `min-score` | `3000` | A host scoring below this (0–10000) is malicious. A host on a threat list scores 1000 at most. |
-| `max-age` | `24h` | Reuse your organization's result for a host if it is newer than this (`45m`, `24h`, `7d`, seconds; at most 30 days). `0` always scans. |
 | `fail-on-malicious` | `true` | Fail the step when a malicious link is found. |
 | `fail-on-unreachable` | `false` | Fail when a host cannot be scanned (it does not resolve, or not to a public address). |
 | `fail-on-error` | `true` | Fail when a host could not be checked (the API refused or could not be reached). |
@@ -65,11 +69,15 @@ jobs:
 | Output | |
 |---|---|
 | `result` | `clean`, `malicious`, `error`, or `none` when there was nothing to check |
-| `links`, `hosts`, `malicious`, `unreachable`, `errors` | Counts |
+| `links`, `hosts`, `malicious`, `unreachable`, `errors`, `skipped` | Counts (`skipped`: hosts switched off for the repository on linkthreatscan.com) |
 | `report` | Path to the JSON report: every host's verdict, score, threats and report link, and every file and line that links to it |
 
 The job summary lists every host. To keep the report, see
 [`examples/link-check.yml`](examples/link-check.yml).
+
+> **Upgrading from 1.0:** `min-score` and `max-age` are no longer inputs. Set
+> them on your organization's CI/CD page instead; a workflow that still passes
+> them gets a warning and the organization's values apply.
 
 ### What is read, and what is skipped
 
@@ -100,7 +108,7 @@ export LINKTHREATSCAN_API_KEY=lts_...
 npx linkthreatscan scan                          # every file under .
 npx linkthreatscan scan docs/ "src/**/*.ts" '!docs/archive/**'
 npx linkthreatscan check https://cdn.example.org/lib.js
-npx linkthreatscan scan --min-score 5000 --max-age 0 --json --report links.json
+npx linkthreatscan scan --json --report links.json
 ```
 
 ```
@@ -119,7 +127,7 @@ npx linkthreatscan scan --min-score 5000 --max-age 0 --json --report links.json
 | `2` | A check failed, the API refused the request, or bad usage |
 
 Options: `--url <url>` and `--exclude-host <host>` (both repeatable),
-`--min-score`, `--max-age`, `--max-hosts`, `--private` / `--public`, `--json`,
+`--max-hosts`, `--private` / `--public`, `--json`,
 `--report <file>`, `--concurrency`, `--timeout`, `--fail-on-unreachable`,
 `--no-fail-on-error`, `--api-url`. Prefer the `LINKTHREATSCAN_API_KEY`
 variable to `--api-key`, which shows up in process lists.
@@ -131,8 +139,8 @@ import { createClient, findLinks, checkHosts, summarize } from "linkthreatscan";
 
 const client = createClient({ apiKey: process.env.LINKTHREATSCAN_API_KEY });
 const { groups } = await findLinks({ patterns: ["docs"], cwd: process.cwd() });
-const results = await checkHosts(client, groups, { minScore: 3000 });
-console.log(summarize(results)); // { hosts, links, clean, malicious, unreachable, errors, reused, result }
+const results = await checkHosts(client, groups);
+console.log(summarize(results)); // { hosts, links, clean, malicious, unreachable, errors, skipped, reused, result }
 ```
 
 ## API
