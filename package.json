@@ -1,0 +1,41 @@
+{
+  "name": "linkthreatscan",
+  "version": "1.0.0",
+  "description": "Find malicious links in your code with LinkThreatScan — from your terminal or CI.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "linkthreatscan": "bin/linkthreatscan.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "action.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
+  "keywords": [
+    "malicious-links",
+    "phishing",
+    "url-scanner",
+    "link-checker",
+    "security",
+    "ci",
+    "github-action"
+  ],
+  "homepage": "https://linkthreatscan.com/docs/api/ci",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/decentralisoft/link-scanner-cicd-action.git"
+  },
+  "bugs": "https://github.com/decentralisoft/link-scanner-cicd-action/issues"
+}

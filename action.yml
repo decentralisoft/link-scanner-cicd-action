@@ -1,0 +1,76 @@
+name: LinkThreatScan Link Check
+description: Find malicious links in your repository — every linked host scored by LinkThreatScan, the build failed below your threshold. For organizations.
+author: LinkThreatScan
+branding:
+  icon: link
+  color: red
+
+inputs:
+  api-key:
+    description: An organization's LinkThreatScan API key (the organization must be subscribed). Store it as a secret.
+    required: true
+  files:
+    description: |
+      Files to read links from, one path, directory or glob per line. Supports *, **, ?, [abc], {a,b}.
+      Prefix a line with ! to exclude, e.g. "!docs/archive/**". .git and node_modules are never read;
+      lockfiles, source maps and binary files are skipped.
+    default: "."
+  urls:
+    description: More URLs to check, one per line, besides the links found in files.
+    default: ""
+  exclude-hosts:
+    description: Hosts to skip, one per line or comma-separated. "example.org" also skips its subdomains; "*.cdn.example.org" is a glob.
+    default: ""
+  min-score:
+    description: A host scoring below this (0–10000) is malicious. Hosts on a threat list score 1000 at most.
+    default: "3000"
+  max-age:
+    description: Reuse your organization's CI result for a host when it is newer than this (e.g. 24h, 7d, 3600). Reused results cost no scan. 0 always scans.
+    default: "24h"
+  fail-on-malicious:
+    description: Fail the step when a malicious link is found.
+    default: "true"
+  fail-on-unreachable:
+    description: Fail the step when a linked host cannot be scanned (it does not resolve, or not to a public address).
+    default: "false"
+  fail-on-error:
+    description: Fail the step when a host could not be checked (the API refused or could not be reached).
+    default: "true"
+  if-no-links-found:
+    description: What to do when there are no links to check — error, warn or ignore.
+    default: ignore
+  max-hosts:
+    description: Refuse to start when the links point at more hosts than this. Each new host is a scan on your organization's quota.
+    default: "500"
+  concurrency:
+    description: Hosts checked in parallel.
+    default: "4"
+  timeout:
+    description: Seconds to wait for one host's verdict.
+    default: "300"
+  private:
+    description: Whether new scans' reports are private to your organization (true or false). Default — the organization's setting.
+    default: ""
+  api-url:
+    description: API base URL.
+    default: https://linkthreatscan.com
+
+outputs:
+  result:
+    description: clean, malicious, error, or none when there was nothing to check.
+  links:
+    description: Number of links found.
+  hosts:
+    description: Number of distinct hosts checked.
+  malicious:
+    description: Number of malicious hosts.
+  unreachable:
+    description: Number of hosts that could not be scanned.
+  errors:
+    description: Number of hosts that could not be checked.
+  report:
+    description: Path to the JSON report (every host's verdict, score, report link, and every file and line linking to it).
+
+runs:
+  using: node24
+  main: src/action-main.js

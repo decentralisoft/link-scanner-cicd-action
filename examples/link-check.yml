@@ -1,0 +1,44 @@
+# Check every link in the repository on each push and pull request, and keep
+# the JSON report as an artifact.
+#
+# Add one of your organization's API keys as a repository secret named
+# LINKTHREATSCAN_API_KEY (Settings → Secrets and variables → Actions).
+
+name: Link check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 6 * * 1" # weekly: a link that was fine last month may not be now
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check links
+        id: links
+        uses: decentralisoft/link-scanner-cicd-action@v1
+        with:
+          api-key: ${{ secrets.LINKTHREATSCAN_API_KEY }}
+          files: |
+            .
+            !test/fixtures/**
+          exclude-hosts: |
+            github.com
+            npmjs.com
+          min-score: 3000
+          max-age: 24h
+
+      - name: Keep the report
+        if: always() && steps.links.outputs.report != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: link-check-report
+          path: ${{ steps.links.outputs.report }}
