@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { extractLinks, groupByHost, hostMatcher, isScannableHost, trimLink } from "../src/links.js";
+import { extractLinks, groupByHost, hostMatcher, ipLink, isScannableHost, trimLink } from "../src/links.js";
 import { findLinks } from "../src/find.js";
 
 const urls = (text) => extractLinks(text).map((l) => l.url);
@@ -82,6 +82,40 @@ test("links group by host, scanning the https origin when there is one", () => {
     [
       ["cdn.other.net", "https://cdn.other.net/", 1],
       ["site.com", "https://site.com/", 2],
+    ],
+  );
+});
+
+test("an IP is grouped by port, and its portless links are bare only when every one is just the IP", () => {
+  assert.deepEqual(ipLink("http://8.8.8.8"), { port: null, bare: true });
+  assert.deepEqual(ipLink("http://8.8.8.8/"), { port: null, bare: true });
+  assert.deepEqual(ipLink("http://8.8.8.8:80/"), { port: "80", bare: true }, "a typed :80 is a port");
+  assert.deepEqual(ipLink("http://8.8.8.8/stuff/whatever"), { port: null, bare: false });
+  assert.deepEqual(ipLink("http://8.8.8.8/?q=1"), { port: null, bare: false });
+  assert.equal(ipLink("https://site.com/"), null);
+  const occ = (url, file, line) => {
+    const u = new URL(url);
+    return { url, host: u.hostname, origin: `${u.origin}/`, file, line, column: 1 };
+  };
+
+  const groups = groupByHost([
+    occ("http://8.8.8.8", "a.md", 1),
+    occ("http://8.8.8.8:8000/login", "a.md", 2),
+    occ("https://8.8.8.8:8443/", "a.md", 3),
+    occ("http://8.8.8.8:80/", "a.md", 4),
+    occ("http://1.1.1.1/", "b.md", 1),
+    occ("http://1.1.1.1/payload.bin", "b.md", 2),
+    occ("https://site.com/x", "b.md", 3),
+  ]);
+  assert.deepEqual(
+    groups.map((g) => [g.host, g.url, g.bareIp, g.occurrences.length]),
+    [
+      ["1.1.1.1", "http://1.1.1.1/", false, 2],
+      ["8.8.8.8", "http://8.8.8.8/", true, 1],
+      ["8.8.8.8:80", "http://8.8.8.8:80/", false, 1],
+      ["8.8.8.8:8000", "http://8.8.8.8:8000/", false, 1],
+      ["8.8.8.8:8443", "https://8.8.8.8:8443/", false, 1],
+      ["site.com", "https://site.com/", undefined, 1],
     ],
   );
 });

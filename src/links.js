@@ -181,23 +181,65 @@ export async function readText(path) {
   }
 }
 
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+
+/** Whether a URL's hostname is an IP address (IPv6 comes bracketed). */
+export function isIpHost(host) {
+  return IPV4_RE.test(host) || host.startsWith("[");
+}
+
+/**
+ * How an IP link is written: its port as typed — `:80` on http counts, though
+ * `URL` drops it — and whether it is only the IP, with nothing after it but a
+ * `/`. `null` for a link whose host is a name.
+ * @returns {{ port: string|null, bare: boolean } | null}
+ */
+export function ipLink(raw) {
+  let parsed;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (!isIpHost(parsed.hostname)) return null;
+  const rest = raw.includes("://") ? raw.slice(raw.indexOf("://") + 3) : raw;
+  const authority = rest.split(/[/?#]/, 1)[0];
+  const hostPort = authority.slice(authority.lastIndexOf("@") + 1);
+  const afterHost = hostPort.includes("]") ? hostPort.slice(hostPort.lastIndexOf("]") + 1) : hostPort;
+  const port = afterHost.includes(":") ? afterHost.slice(afterHost.indexOf(":") + 1) || null : null;
+  const bare = (parsed.pathname === "/" || parsed.pathname === "") && !parsed.search && !parsed.hash && !/[?#]/.test(rest);
+  return { port, bare };
+}
+
 /**
  * Group occurrences by host. The scanned URL is the host's https origin when
  * any link to it uses https, else its http origin.
+ *
+ * An IP address is grouped by port instead: `1.2.3.4:8000` and `1.2.3.4:8443`
+ * are different services, each with its own verdict. Its links without a port
+ * are one group, sent with `bareIp: true` when every one of them is only the
+ * IP (`http://1.2.3.4/`) — the API answers that unreachable without a scan —
+ * and `false` when any has a path, which is scanned. A name's group has no
+ * `bareIp`.
  * @param {{ url: string, host: string, origin: string, file: string, line?: number, column?: number }[]} occurrences
  * @param {(host: string) => boolean} [excluded]
- * @returns {{ host: string, url: string, occurrences: object[] }[]} sorted by host
+ * @returns {{ host: string, url: string, bareIp?: boolean, occurrences: object[] }[]} sorted by host
  */
 export function groupByHost(occurrences, excluded = () => false) {
   const groups = new Map();
   for (const o of occurrences) {
     if (excluded(o.host)) continue;
-    let g = groups.get(o.host);
+    const ip = ipLink(o.url);
+    const key = ip?.port ? `${o.host}:${ip.port}` : o.host;
+    // With the port as typed: `http://1.2.3.4:80/` must not read as bare.
+    const origin = ip?.port ? `${new URL(o.url).protocol}//${key}/` : o.origin;
+    let g = groups.get(key);
     if (!g) {
-      g = { host: o.host, url: o.origin, occurrences: [] };
-      groups.set(o.host, g);
+      g = { host: key, url: origin, ...(ip ? { bareIp: !ip.port } : {}), occurrences: [] };
+      groups.set(key, g);
     }
-    if (g.url.startsWith("http:") && o.origin.startsWith("https:")) g.url = o.origin;
+    if (g.url.startsWith("http:") && origin.startsWith("https:")) g.url = origin;
+    if (ip && !ip.bare) g.bareIp = false;
     const { file, line, column, url } = o;
     g.occurrences.push({ file, ...(line ? { line, column } : {}), url });
   }

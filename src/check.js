@@ -71,6 +71,7 @@ export async function checkHost(client, group, { ci, private: isPrivate, batchId
       private: isPrivate,
       batchId,
       links: group.occurrences.length,
+      bareIp: group.bareIp,
     });
     const status = v.verdict === "skipped" ? Status.SKIPPED : v.verdict === "failed" ? Status.MALICIOUS : Status.CLEAN;
     return {
