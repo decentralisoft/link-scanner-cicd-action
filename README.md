@@ -11,10 +11,9 @@ links to it.
 - **Only origins leave the runner.** Each host is checked once, as
   `https://host/`. Paths and query strings, which can carry tokens, are never
   sent.
-- **IP addresses by port.** `http://203.0.113.7:8000/` and `:8443` are checked
-  separately. Links to an IP without a port that are only the IP
-  (`http://203.0.113.7/`) are reported unreachable without a scan; one with a
-  path is scanned.
+- **IP addresses by port.** `https://203.0.113.7/`, `:8000` and `:8443` are
+  checked separately. An IP is scanned when a web server answers there, and
+  reported unreachable — at no cost — when nothing does.
 - **Configured on linkthreatscan.com, not in the workflow.** Your
   organization's **CI/CD** page sets the minimum score (3,000 to start) and
   how long a result is reused (24 hours to start), and lists the hosts of each

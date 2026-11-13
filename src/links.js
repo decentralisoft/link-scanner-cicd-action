@@ -216,14 +216,12 @@ export function ipLink(raw) {
  * any link to it uses https, else its http origin.
  *
  * An IP address is grouped by port instead: `1.2.3.4:8000` and `1.2.3.4:8443`
- * are different services, each with its own verdict. Its links without a port
- * are one group, sent with `bareIp: true` when every one of them is only the
- * IP (`http://1.2.3.4/`) — the API answers that unreachable without a scan —
- * and `false` when any has a path, which is scanned. A name's group has no
- * `bareIp`.
+ * are different services, each with its own verdict; its links without a port
+ * are one more. The API scans an IP when a web server answers there, and
+ * answers unreachable when nothing does.
  * @param {{ url: string, host: string, origin: string, file: string, line?: number, column?: number }[]} occurrences
  * @param {(host: string) => boolean} [excluded]
- * @returns {{ host: string, url: string, bareIp?: boolean, occurrences: object[] }[]} sorted by host
+ * @returns {{ host: string, url: string, occurrences: object[] }[]} sorted by host
  */
 export function groupByHost(occurrences, excluded = () => false) {
   const groups = new Map();
@@ -235,11 +233,10 @@ export function groupByHost(occurrences, excluded = () => false) {
     const origin = ip?.port ? `${new URL(o.url).protocol}//${key}/` : o.origin;
     let g = groups.get(key);
     if (!g) {
-      g = { host: key, url: origin, ...(ip ? { bareIp: !ip.port } : {}), occurrences: [] };
+      g = { host: key, url: origin, occurrences: [] };
       groups.set(key, g);
     }
     if (g.url.startsWith("http:") && origin.startsWith("https:")) g.url = origin;
-    if (ip && !ip.bare) g.bareIp = false;
     const { file, line, column, url } = o;
     g.occurrences.push({ file, ...(line ? { line, column } : {}), url });
   }

@@ -129,16 +129,14 @@ export function createClient({
      * @param {boolean} [req.private]    whether a fresh scan's report is private; default: the organization's
      * @param {string} [req.batchId]     groups one run's checks on the CI/CD page
      * @param {number} [req.links]       how many links point at the host (shown on the CI/CD page)
-     * @param {boolean} [req.bareIp]     an IP's links without a port: true when every one is only the IP
      */
-    checkLink: ({ url, ci, private: isPrivate, batchId, links, bareIp }) =>
+    checkLink: ({ url, ci, private: isPrivate, batchId, links }) =>
       call("POST", "/api/v1/ci/check", {
         url,
         ...(ci ? { ci } : {}),
         ...(isPrivate !== undefined ? { private: isPrivate } : {}),
         ...(batchId ? { batchId } : {}),
         ...(links ? { links } : {}),
-        ...(typeof bareIp === "boolean" ? { bareIp } : {}),
       }),
   };
 }

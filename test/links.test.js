@@ -86,7 +86,7 @@ test("links group by host, scanning the https origin when there is one", () => {
   );
 });
 
-test("an IP is grouped by port, and its portless links are bare only when every one is just the IP", () => {
+test("an IP is grouped by port", () => {
   assert.deepEqual(ipLink("http://8.8.8.8"), { port: null, bare: true });
   assert.deepEqual(ipLink("http://8.8.8.8/"), { port: null, bare: true });
   assert.deepEqual(ipLink("http://8.8.8.8:80/"), { port: "80", bare: true }, "a typed :80 is a port");
@@ -108,14 +108,14 @@ test("an IP is grouped by port, and its portless links are bare only when every 
     occ("https://site.com/x", "b.md", 3),
   ]);
   assert.deepEqual(
-    groups.map((g) => [g.host, g.url, g.bareIp, g.occurrences.length]),
+    groups.map((g) => [g.host, g.url, g.occurrences.length]),
     [
-      ["1.1.1.1", "http://1.1.1.1/", false, 2],
-      ["8.8.8.8", "http://8.8.8.8/", true, 1],
-      ["8.8.8.8:80", "http://8.8.8.8:80/", false, 1],
-      ["8.8.8.8:8000", "http://8.8.8.8:8000/", false, 1],
-      ["8.8.8.8:8443", "https://8.8.8.8:8443/", false, 1],
-      ["site.com", "https://site.com/", undefined, 1],
+      ["1.1.1.1", "http://1.1.1.1/", 2],
+      ["8.8.8.8", "http://8.8.8.8/", 1],
+      ["8.8.8.8:80", "http://8.8.8.8:80/", 1],
+      ["8.8.8.8:8000", "http://8.8.8.8:8000/", 1],
+      ["8.8.8.8:8443", "https://8.8.8.8:8443/", 1],
+      ["site.com", "https://site.com/", 1],
     ],
   );
 });
